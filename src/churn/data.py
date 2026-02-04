@@ -13,6 +13,9 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     drop_cols = ["Churn Label", "Churn Score", "CLTV"]
     df = df.drop(columns=[c for c in drop_cols if c in df.columns])
 
+    drop_unwanted_cols = ["Customer ID", "Count", "Country", "State", "City", "Zip Code"]
+    df = df.drop(columns=[c for c in drop_unwanted_cols if c in df.columns])
+
     # Fix totlal charges isuue
     if "Total Charges" in df.columns and "tenure" in df.columns:
         df["Total Charges"] = df["Total Charges"].fillna(0)
