@@ -1,11 +1,11 @@
 import pandas as pd
 from typing import Tuple 
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, FunctionTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 
-def split_features_traget(
+def split_features_target(
         df: pd.DataFrame, target_col: str
     ) -> Tuple[pd.DataFrame, pd.Series]:
     """Split the dataframe into features and target variable"""
@@ -18,34 +18,37 @@ def split_features_traget(
 
     return X, y
 
-def preprocessing_pipeline(X: pd.DataFrame) -> ColumnTransformer:
+
+def preprocessing_pipeline(X: pd.DataFrame, clean_data_func) -> Pipeline:
     """
-    Build a preprocessing transformer
-    - Numeric: impute + scale 
-    - categorical : impute + one-hot encode
+    Build end-to-end preprocessing pipeline
+    - Step 1: Clean (drop leakage/unwanted columns)
+    - Step 2: Numeric (impute + scale)
+    - Step 3: Categorical (impute + one-hot)
     """
-    numeric_cols = X.select_dtypes(include=["number"]).columns.tolist()
-    categorical_cols = X.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
+    # First, figure out which columns to keep after cleaning
+    X_clean = clean_data_func(X)
+    
+    numeric_cols = X_clean.select_dtypes(include=["number"]).columns.tolist()
+    categorical_cols = X_clean.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
 
-    numeric_transformer = Pipeline(
-        steps=[
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler())
-        ]
-    )
+    numeric_transformer = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler())
+    ])
 
-    categorical_transformer = Pipeline(
-        steps=[
-            ("imputer", SimpleImputer(strategy="most_frequent")),
-            ("onehot", OneHotEncoder(handle_unknown="ignore"))
-        ]
-    )
+    categorical_transformer = Pipeline([
+        ("imputer", SimpleImputer(strategy="most_frequent")),
+        ("onehot", OneHotEncoder(handle_unknown="ignore"))
+    ])
 
-    preprocessor = ColumnTransformer(
-        transformers=[
+    # Full pipeline: cleaning + preprocessing
+    full_pipeline = Pipeline([
+        ("cleaner", FunctionTransformer(func=clean_data_func, validate=False)),
+        ("preprocessor", ColumnTransformer([
             ("num", numeric_transformer, numeric_cols),
             ("cat", categorical_transformer, categorical_cols)
-        ]
-    )
+        ]))
+    ])
 
-    return preprocessor
+    return full_pipeline
