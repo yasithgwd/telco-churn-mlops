@@ -1,7 +1,6 @@
 import sys
 from pathlib import Path
 from sklearn.pipeline import Pipeline
-import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(PROJECT_ROOT / "src"))
@@ -11,16 +10,24 @@ from churn.features import split_features_target, preprocessing_pipeline
 from churn.split import make_train_test_split
 from churn.train import train_logreg_model
 from churn.evaluate import evaluate_model
-from churn.io import save_model, save_json
+from churn.io import save_model, save_json, utc_now_compact, sha256_file, git_commit_hash
 
 DATA_PATH = PROJECT_ROOT / "data" / "raw" / "Telco_customer_churn.csv"
 TARGET_COL = "Churn Value"
-PROCESSED_DATA_PATH = PROJECT_ROOT / "data" / "processed" / "telco_churn_processed.csv"
-MODEL_PATH = PROJECT_ROOT / "artifacts" / "models" / "logreg.joblib"
-METRICS_PATH = PROJECT_ROOT / "artifacts" / "reports" / "metrics.json"
+
+ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
+MODELS_DIR = ARTIFACTS_DIR / "models"
+REPORTS_DIR = ARTIFACTS_DIR / "reports"
 
 if __name__ == "__main__":
-    print("")
+    run_id = utc_now_compact()
+
+    model_dir = MODELS_DIR / run_id
+    report_dir = REPORTS_DIR / run_id
+
+    model_path = model_dir / "model.joblib"
+    metrics_path = report_dir / "metrics.json"
+    run_path = report_dir / "run.json"
 
     df = load_data(str(DATA_PATH))
     X, y = split_features_target(df, TARGET_COL)
@@ -35,19 +42,24 @@ if __name__ == "__main__":
     metrics = evaluate_model(model, X_test_t, y_test)
 
     full_pipeline = Pipeline([
-        ('preprocessor', preprocessor),
-        ('model', model)     
+        ("preprocessor", preprocessor),
+        ("model", model),
     ])
 
-    print(metrics)
+    save_model(full_pipeline, str(model_path))
+    save_json(metrics, str(metrics_path))
 
-    save_model(full_pipeline, str(MODEL_PATH))
-    save_json(metrics, str(METRICS_PATH))
-    print("METRICS OBJECT:", metrics)
-    print("METRICS TYPE:", type(metrics))
-    print(f"Saved model to: {MODEL_PATH}")
-    print(f"Saved metrics to: {METRICS_PATH}")
+    run_meta = {
+        "run_id": run_id,
+        "model_path": str(model_path.relative_to(PROJECT_ROOT)),
+        "metrics_path": str(metrics_path.relative_to(PROJECT_ROOT)),
+        "data_path": str(DATA_PATH.relative_to(PROJECT_ROOT)),
+        "data_sha256": sha256_file(DATA_PATH),
+        "target_col": TARGET_COL,
+        "git_commit": git_commit_hash(PROJECT_ROOT),
+    }
+    save_json(run_meta, str(run_path))
 
-
-    print("Training data shape:", X_train_t.shape)
-    print("Test data shape:", X_test_t.shape)
+    print(f"Saved model to {model_path}")
+    print(f"Saved metrics to {metrics_path}")
+    print(f"Saved run metadata to {run_path}")
