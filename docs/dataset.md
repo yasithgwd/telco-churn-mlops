@@ -2,47 +2,60 @@
 
 ## Source
 
-- Primary file: `data/raw/Telco_customer_churn.csv`
+- Primary training file: `data/raw/Telco_customer_churn.csv`
 - Optional spreadsheet source: `data/raw/Telco_customer_churn.xlsx`
 
-## Shape
+## Shape and Target
 
-- Rows: 7043
-- Columns: 33
-- Target column: `Churn Value` (binary label)
+- Rows: `7043`
+- Columns: `33`
+- Target column: `Churn Value` (binary)
 
-Target distribution (`Churn Value`):
+Target distribution:
 
-- `0`: 5174
-- `1`: 1869
+- `0`: `5174`
+- `1`: `1869`
+
+Reason this matters: the dataset is imbalanced, so preserving class ratio in train/test split is important.
 
 ## Raw Columns
 
 `CustomerID`, `Count`, `Country`, `State`, `City`, `Zip Code`, `Lat Long`, `Latitude`, `Longitude`, `Gender`, `Senior Citizen`, `Partner`, `Dependents`, `Tenure Months`, `Phone Service`, `Multiple Lines`, `Internet Service`, `Online Security`, `Online Backup`, `Device Protection`, `Tech Support`, `Streaming TV`, `Streaming Movies`, `Contract`, `Paperless Billing`, `Payment Method`, `Monthly Charges`, `Total Charges`, `Churn Label`, `Churn Value`, `Churn Score`, `CLTV`, `Churn Reason`
 
-## Data Cleaning Rules (Current Implementation)
+## Cleaning Rules in Current Code
 
-Defined in `src/churn/data.py`:
+Defined in `src/churn/data.py` (`clean_data`):
 
-- Drops leakage-like columns if present:
-  - `Churn Label`, `Churn Score`, `CLTV`
-- Drops location/identifier columns:
-  - `Customer ID`, `Count`, `Country`, `State`, `City`, `Zip Code`
-- Fills missing `Total Charges` with `0` if `tenure` exists
+1. Copy input DataFrame.
+Reason: avoids in-place mutation side effects.
 
-Notes:
+2. Drop leakage columns when present:
+`Churn Label`, `Churn Score`, `CLTV`, `Churn Reason`
+Reason: these columns directly encode or strongly leak churn outcomes.
 
-- In the raw data, the customer ID column is `CustomerID` (no space), while cleaning drops `Customer ID` (with space). This means `CustomerID` is currently not dropped by that rule.
-- The `tenure` check may not match the current raw schema, which uses `Tenure Months`.
+3. Drop location/identifier columns when present:
+`CustomerID`, `Count`, `Country`, `State`, `City`, `Zip Code`, `Latitude`, `Longitude`, `Lat Long`
+Reason: reduces identifiers and high-cardinality fields not required for baseline model behavior.
 
-## Feature and Target Split
+4. Fill missing `Total Charges` with `0` only if column `tenure` exists.
+Reason: intended missing-value handling rule in code.
+
+## Important Current Behavior Notes
+
+- The raw schema uses `Tenure Months`, not `tenure`.
+- Because of that mismatch, the current conditional fill for `Total Charges` usually does not run.
+- The preprocessing stage still applies numeric median imputation, so missing numeric values are handled later in the pipeline.
+
+## Feature/Target Split
 
 Defined in `src/churn/features.py`:
 
-- Features: all columns except `Churn Value`
-- Target: `Churn Value`
+- Features (`X`): all columns except `Churn Value`
+- Target (`y`): `Churn Value`
 
-## Training/Test Split
+Reason this matters: all modeling and preprocessing are built around this fixed target contract.
+
+## Train/Test Split
 
 Defined in `src/churn/split.py`:
 
@@ -50,19 +63,35 @@ Defined in `src/churn/split.py`:
 - Random state: `42`
 - Stratified split: enabled by default
 
-## Preprocessing
+Reason this matters: reproducible and class-balanced evaluation.
+
+## Preprocessing Pipeline
 
 Defined in `src/churn/features.py`:
 
-- Numeric features:
-  - Median imputation
-  - Standard scaling
-- Categorical features:
-  - Most-frequent imputation
-  - One-hot encoding (`handle_unknown="ignore"`)
+1. Cleaner step (`FunctionTransformer(clean_data)`).
+Reason: applies the same cleaning during both training and inference.
 
-## Outputs
+2. Numeric branch:
+- `SimpleImputer(strategy="median")`
+- `StandardScaler()`
+Reason: robust missing-value handling and scale normalization for linear models.
 
-- Model artifact: `artifacts/models/logreg.joblib`
-- Metrics report: `artifacts/reports/metrics.json`
-- Optional processed file present in repo: `data/processed/telco_churn_processed.csv`
+3. Categorical branch:
+- `SimpleImputer(strategy="most_frequent")`
+- `OneHotEncoder(handle_unknown="ignore")`
+Reason: converts categories to numeric model input and prevents failures on unseen categories.
+
+## Training Outputs
+
+For each training run `<RUN_ID>`:
+
+- Model artifact: `artifacts/models/<RUN_ID>/model.joblib`
+- Metrics report: `artifacts/reports/<RUN_ID>/metrics.json`
+- Run metadata: `artifacts/reports/<RUN_ID>/run.json`
+
+Production pointer:
+
+- `artifacts/models/production.json`
+
+Reason this matters: versioned artifacts support reproducibility; production pointer supports controlled deployment selection.

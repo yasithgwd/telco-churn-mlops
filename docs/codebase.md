@@ -2,56 +2,106 @@
 
 ## Overview
 
-This project follows a simple split between:
+This project is organized into:
 
-- `scripts/`: runnable entry points
-- `src/churn/`: reusable modules for data, features, train, evaluate, and I/O
-- `data/`: raw and processed datasets
-- `artifacts/`: saved models, reports, and predictions
+- `scripts/`: runnable entry points for training, promotion, and prediction
+- `src/churn/`: reusable data, feature, split, training, evaluation, and I/O logic
+- `data/`: raw and optional processed datasets
+- `artifacts/`: versioned models, reports, and predictions
 
 ## Directory Map
 
 ```text
 scripts/
-  train.py         # Training pipeline runner
-  predict.py       # Batch prediction runner (pipeline artifact path)
+  train_pipeline.py   # Trains and saves versioned model + reports
+  promote_model.py    # Updates production model pointer
+  predict.py          # Batch prediction using production model or override path
 
 src/churn/
-  data.py          # Load + clean raw data
-  features.py      # Feature/target split + preprocessing pipeline
-  split.py         # Train/test split helper
-  train.py         # Logistic regression training function
-  evaluate.py      # Classification metrics
-  io.py            # Model/JSON persistence helpers
-  config.py        # Alternate prediction CLI-style implementation
+  data.py             # Load + clean data
+  features.py         # Feature/target split + preprocessing pipeline builder
+  split.py            # Train/test split helper
+  train.py            # Logistic regression trainer
+  evaluate.py         # Classification metrics
+  io.py               # Save/load helpers + run metadata utilities
 ```
 
-## Training Flow
+## End-to-End Flow (Step-by-Step + Why)
 
-Entry point: `scripts/train.py`
+1. Run `scripts/train_pipeline.py`.
+Reason: this is the canonical training entry point for the current version.
 
-Sequence:
+2. Load raw dataset from `data/raw/Telco_customer_churn.csv`.
+Reason: keeps training on a fixed source path for consistent runs.
 
-1. Adds `src` to `sys.path` for imports.
-2. Loads `data/raw/Telco_customer_churn.csv`.
-3. Cleans data using `src/churn/data.py`.
-4. Splits into features/target (`Churn Value`).
-5. Performs train/test split (stratified).
-6. Builds preprocessing pipeline and transforms train/test sets.
-7. Trains logistic regression model from `src/churn/train.py`.
-8. Evaluates with accuracy, precision, recall, F1, confusion matrix.
-9. Saves:
-   - model to `artifacts/models/logreg.joblib`
-   - metrics to `artifacts/reports/metrics.json`
+3. Split features/target using target column `Churn Value`.
+Reason: preserves one clear binary classification label contract.
 
-## Prediction Paths
+4. Create train/test split with stratification.
+Reason: keeps class distribution stable across train/test, improving evaluation reliability.
 
-There are currently two prediction implementations:
+5. Build preprocessing pipeline (`cleaner` + `ColumnTransformer`) and fit on training data.
+Reason: avoids leakage and ensures prediction-time transformations match training-time logic.
 
-- `scripts/predict.py`: Expects a single serialized pipeline artifact (`telco_churn_pipeline.joblib`) and predicts directly on raw-style input columns.
-- `src/churn/config.py`: Loads separate model/preprocessor/feature-columns artifacts and runs a batch prediction routine.
+6. Train logistic regression model on transformed training data.
+Reason: establishes a strong and interpretable baseline classifier.
 
-Because these paths use different artifact assumptions, they should be treated as separate workflows unless unified.
+7. Evaluate model on transformed test data.
+Reason: captures baseline performance with accuracy, precision, recall, F1, and confusion matrix.
+
+8. Save versioned artifacts using a UTC timestamp run ID (`YYYYMMDD_HHMMSS`).
+Reason: enables reproducibility, comparison, and controlled promotion.
+
+## Artifacts Produced by Training
+
+For run ID `<RUN_ID>`:
+
+- Model: `artifacts/models/<RUN_ID>/model.joblib`
+- Metrics: `artifacts/reports/<RUN_ID>/metrics.json`
+- Run metadata: `artifacts/reports/<RUN_ID>/run.json`
+
+`run.json` includes:
+
+- `run_id`
+- `model_path`
+- `metrics_path`
+- `data_path`
+- `data_sha256`
+- `target_col`
+- `git_commit` (if available)
+
+## Production Promotion Flow
+
+Script: `scripts/promote_model.py --run_id <RUN_ID>`
+
+Step-by-step:
+
+1. Validate `artifacts/models/<RUN_ID>/model.joblib` exists.
+Reason: prevents promoting missing or invalid runs.
+
+2. Write `artifacts/models/production.json` with `run_id` and `model_path`.
+Reason: gives prediction a stable production pointer decoupled from training.
+
+## Prediction Flow
+
+Script: `scripts/predict.py`
+
+Path selection order:
+
+1. If `--model` is provided, use it.
+Reason: supports testing or backfills against a specific artifact.
+
+2. Otherwise read `artifacts/models/production.json`.
+Reason: defaults to deployed/approved model.
+
+Prediction behavior:
+
+- Reads CSV input into DataFrame
+- Uses `pipeline.predict_proba(df)[:, 1]` for churn probability
+- Applies threshold `0.5` for binary class
+- Writes output CSV with:
+  - `churn_probability`
+  - `churn_prediction`
 
 ## Core Module Contracts
 
@@ -59,8 +109,8 @@ Because these paths use different artifact assumptions, they should be treated a
   - `load_data(path) -> DataFrame`
   - `clean_data(df) -> DataFrame`
 - `src/churn/features.py`
-  - `split_features_traget(df, target_col) -> (X, y)`
-  - `preprocessing_pipeline(X) -> ColumnTransformer`
+  - `split_features_target(df, target_col) -> (X, y)`
+  - `preprocessing_pipeline(X, clean_data_func) -> Pipeline`
 - `src/churn/split.py`
   - `make_train_test_split(X, y, test_size=0.2, random_state=42, stratify=True)`
 - `src/churn/train.py`
@@ -70,9 +120,6 @@ Because these paths use different artifact assumptions, they should be treated a
 - `src/churn/io.py`
   - `save_model(model, path)`
   - `save_json(obj, path)`
-
-## Current Caveats
-
-- `scripts/train.py` loads data twice before cleaning; one load is redundant.
-- The function name `split_features_traget` contains a typo and is used consistently with that name.
-- `scripts/predict.py` artifact expectations do not match `scripts/train.py` outputs by default.
+  - `utc_now_compact()`
+  - `sha256_file(path)`
+  - `git_commit_hash(project_root)`
