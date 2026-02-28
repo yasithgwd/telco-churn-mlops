@@ -186,3 +186,5 @@ cython_debug/
 # pipeline outputs 
 artifacts/
 data/processed 
+
+notebooks/

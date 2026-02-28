@@ -34,7 +34,7 @@ if __name__ == "__main__":
 
     X_train, X_test, y_train, y_test = make_train_test_split(X, y)
 
-    preprocessor = preprocessing_pipeline(X_train, clean_data)
+    preprocessor = preprocessing_pipeline(clean_data)
     X_train_t = preprocessor.fit_transform(X_train)
     X_test_t = preprocessor.transform(X_test)
 
